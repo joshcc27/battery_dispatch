@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "battery-dispatch"
+version = "0.1.0"
+description = "Energy-only NEM battery dispatch backtesting"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "highspy>=1.8",
+  "linopy>=0.5",
+  "matplotlib>=3.8",
+  "nemosis>=3.8",
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "pyarrow>=16",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5"]
+
+[project.scripts]
+battery-dispatch = "battery_dispatch.cli:main"
+
+[tool.setuptools]
+package-dir = {battery_dispatch = "src"}
+packages = ["battery_dispatch"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.coverage.run]
+source = ["battery_dispatch"]
+
