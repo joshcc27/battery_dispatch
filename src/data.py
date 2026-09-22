@@ -143,9 +143,8 @@ def validate_context(
 
 
 def _month_starts(start: pd.Timestamp, end: pd.Timestamp) -> list[pd.Timestamp]:
-    first_interval_end = start + pd.Timedelta(minutes=5)
-    first = first_interval_end.tz_localize(None).to_period("M").start_time
-    last = end.tz_localize(None).to_period("M").start_time
+    first = start.tz_localize(None).to_period("M").start_time
+    last = (end - pd.Timedelta(nanoseconds=1)).tz_localize(None).to_period("M").start_time
     return list(pd.date_range(first, last, freq="MS"))
 
 
@@ -154,7 +153,9 @@ class MarketDataCache:
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
-        self.partition_root = self.root / "partitions"
+        # v2 partitions are physical calendar months represented by interval
+        # ends in (month_start, next_month_start].
+        self.partition_root = self.root / "partitions_v2"
         self.raw_root = self.root / "nemosis_raw"
         self.manifest_path = self.root / "manifest.jsonl"
 
@@ -237,15 +238,13 @@ class MarketDataCache:
                     filter_cols=["REGIONID"],
                     filter_values=([region],),
                     keep_csv=False,
-                    keep_zip=True,
                 )
                 normal = validate_prices(raw)
                 month_start_aest = month.tz_localize(AEST)
                 month_end_aest = month_end.tz_localize(AEST)
                 normal = normal.loc[
-                    normal["settlementdate"].between(
-                        month_start_aest, month_end_aest, inclusive="left"
-                    )
+                    normal["settlementdate"].gt(month_start_aest)
+                    & normal["settlementdate"].le(month_end_aest)
                 ].copy()
                 if normal.empty:
                     raise ValueError(f"NEMOSIS returned no rows for {region} in {month:%Y-%m}")
@@ -313,15 +312,13 @@ class MarketDataCache:
                     filter_cols=["REGIONID"],
                     filter_values=([region],),
                     keep_csv=False,
-                    keep_zip=True,
                 )
                 normal = validate_context(raw)
                 month_start_aest = month.tz_localize(AEST)
                 month_end_aest = month_end.tz_localize(AEST)
                 normal = normal.loc[
-                    normal["settlementdate"].between(
-                        month_start_aest, month_end_aest, inclusive="left"
-                    )
+                    normal["settlementdate"].gt(month_start_aest)
+                    & normal["settlementdate"].le(month_end_aest)
                 ].copy()
                 if normal.empty:
                     raise ValueError(f"NEMOSIS returned no context for {region} in {month:%Y-%m}")

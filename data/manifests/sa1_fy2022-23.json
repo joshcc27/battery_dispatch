@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "dataset_id": "aemo_dispatchprice_sa1_fy2022-23",
+  "source": {
+    "publisher": "Australian Energy Market Operator",
+    "table": "DISPATCHPRICE",
+    "archive_url": "https://nemweb.com.au/Data_Archive/Wholesale_Electricity/MMSDM/",
+    "retrieval_library": "NEMOSIS",
+    "region_filter": ["SA1"],
+    "intervention_filter": 0
+  },
+  "period": {
+    "physical_start_inclusive": "2022-07-01T00:00:00+10:00",
+    "physical_end_exclusive": "2023-07-01T00:00:00+10:00",
+    "first_interval_end": "2022-07-01T00:05:00+10:00",
+    "last_interval_end": "2023-07-01T00:00:00+10:00",
+    "interval_minutes": 5,
+    "timezone": "fixed UTC+10 (AEST)",
+    "timestamp_semantics": "interval ending; physical range is (start, end]"
+  },
+  "partitions": [
+    {"month": "2022-07", "row_count": 8928},
+    {"month": "2022-08", "row_count": 8928},
+    {"month": "2022-09", "row_count": 8640},
+    {"month": "2022-10", "row_count": 8928},
+    {"month": "2022-11", "row_count": 8640},
+    {"month": "2022-12", "row_count": 8928},
+    {"month": "2023-01", "row_count": 8928},
+    {"month": "2023-02", "row_count": 8064},
+    {"month": "2023-03", "row_count": 8928},
+    {"month": "2023-04", "row_count": 8640},
+    {"month": "2023-05", "row_count": 8928},
+    {"month": "2023-06", "row_count": 8640}
+  ],
+  "validation": {
+    "row_count": 105120,
+    "expected_row_count": 105120,
+    "duplicate_key_count": 0,
+    "missing_interval_count": 0,
+    "unexpected_interval_count": 0,
+    "rrp_min_aud_per_mwh": -1000.0,
+    "rrp_max_aud_per_mwh": 15500.0,
+    "canonical_price_sha256": "3beacbd0bd39b09bd44d936f11fa3811ab44d2304fae1b4c4fd246e4fdd8b30a",
+    "checksum_definition": "SHA-256 of pandas uint64 row hashes after sorting settlementdate, regionid, rrp"
+  }
+}

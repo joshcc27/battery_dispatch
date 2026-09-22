@@ -1,131 +1,114 @@
 # Battery dispatch
 
-An energy-only, five-minute NEM battery backtest. For a meter-side dispatch
-trace it computes:
+An auditable, energy-only, five-minute NEM battery backtest. The reference case
+is a **hypothetical** 100 MW / 200 MWh battery at the Hornsdale 275 kV
+connection point in SA1; it is not a model of the actual Hornsdale Power
+Reserve.
+
+For a meter-side dispatch trace, cash revenue is
 
 ```text
 sum(dt * RRP * (generation_MLF * discharge - load_MLF * charge))
-- degradation_cost_per_MWh * discharged_MWh
+- degradation_cost_per_discharged_MWh * discharged_MWh
 ```
 
-The reference physical asset is 100 MW / 200 MWh in SA1, with 87% round-trip
-efficiency and a configurable 5%–95% SOC envelope. Round-trip efficiency is
-split symmetrically between charging and discharging. SOC is stored energy;
-charge and discharge are measured at the connection point.
-Annual runs start at minimum SOC so opening inventory is not counted as free
-arbitrage revenue.
+The asset has 87% round-trip efficiency, split symmetrically between charge and
+discharge, and a 5%–95% SOC envelope. SOC is stored energy; power is measured at
+the connection point. The headline case starts at minimum SOC so unpriced
+opening inventory is not counted as arbitrage revenue.
 
-## Scope decision: energy only
+## Verified FY2022-23 reference result
 
-FCAS, caps, contracts, network support revenue, and compensation are excluded.
-Accordingly, FCAS is exactly **0% of modelled revenue**. That is a model scope
-statement, not an estimate of FCAS's share of a real battery's realised
-revenue. A realised FCAS share cannot be stated honestly without naming the
-asset and period; it must be attached to each external AEMO Quarterly Energy
-Dynamics comparison. The annual energy result should be meaningfully below a
-comparable real battery's total energy-plus-FCAS revenue.
+The full SA1 financial year contains 105,120 unique five-minute observations
+from `(2022-07-01 00:00, 2023-07-01 00:00]` AEST. The headline degradation cost
+is an illustrative A$25/discharged MWh.
 
-June 2022 administered pricing and market suspension rows are retained and
-flagged as `june_2022_event`. Report runs both including and excluding that flag.
+| Metric | Result |
+|---|---:|
+| Gross wholesale-energy revenue | A$42.320m |
+| Illustrative degradation cost | A$3.932m |
+| Net model revenue | A$38.388m |
+| Gross energy revenue / MW-year | A$423,490 |
+| Net revenue / MW-year | A$384,143 |
+| Equivalent full cycles | 786.4 |
+| Terminal SOC | 10.0 MWh |
+| Optimal rolling windows | 365 / 365 |
 
-## Mechanics
+All price, solver, energy-balance, exclusivity and completed-cycle audit gates
+passed. The canonical price checksum and monthly counts are committed in
+[`data/manifests/sa1_fy2022-23.json`](data/manifests/sa1_fy2022-23.json).
+Large cache and dispatch files remain intentionally untracked.
 
-- NEM timestamps are parsed as fixed UTC+10 (`AEST`), never a daylight-saving
-  timezone. `SETTLEMENTDATE` is the interval end.
-- `INTERVENTION = 0` is selected before key uniqueness is checked.
-- RRP is checked against the dated AEMC market price cap and the −$1,000/MWh
-  market floor. An unknown financial year fails instead of reusing a stale cap.
-- Generation and load MLFs are explicit, separately sourced inputs. They are not
-  assumed reciprocal.
-  A `LossFactorTable` can key them by financial year, and settlement resolves
-  the applicable pair for every interval-ending timestamp. The optimiser and
-  settlement share the same MLF-adjusted marginal cashflow coefficients.
-- A binary charge mode prevents simultaneous charging and discharging,
-  including under negative prices.
-- No ramp constraint is imposed: a grid battery can reverse within a five-minute
-  dispatch interval, making such a constraint non-binding at this resolution.
-- The rolling policy solves 48 hours, implements 24, carries SOC, and discards
-  the look-ahead tail. It does not impose an artificial terminal SOC.
+## Scope
 
-## Layout
+The model includes wholesale-energy arbitrage only. FCAS, caps, contracts,
+network support, compensation, availability outages, bidding behavior and
+market impact are excluded. FCAS is therefore exactly 0% of **modelled**
+revenue, not an estimate of its share for a real battery. Published fleet
+results are retained only as scope-aware contextual checks; see
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
-```text
-src/config.py       asset parameters, annual MLF types, dated price caps
-src/data.py         NEMOSIS download, monthly parquet cache, ingest assertions
-src/battery.py      SOC physics and feasibility checks
-src/settlement.py   the sole authoritative revenue calculation
-src/optimiser.py    linopy/HiGHS per-window MILP
-src/horizon.py      rolling-horizon driver
-src/metrics.py      run summary and durable CSV output
-src/plots.py        plots generated from interval CSVs
-src/study.py        region/FY/degradation sweep orchestration
-tests/              hand-worked and invariant tests
-```
+No ramp constraint is imposed because a grid battery can reverse within a
+five-minute interval. A binary mode prevents simultaneous charging and
+discharging, including at negative prices. A non-settled A$0.0001/MWh
+throughput tie-breaker selects the least-cycling schedule among economically
+equivalent optima. The rolling policy optimizes 48 hours, commits 24 hours,
+carries SOC, and discards the look-ahead tail.
 
-A dispatch trace is always a dataframe with `settlementdate`, `charge_mw`,
-`discharge_mw`, and end-of-interval `soc_mwh`. Optimised and future simulated
-policies therefore share settlement and metrics code.
+## Reproduce
 
-## Install and test
+Install and run the automated gates:
 
 ```powershell
 uv sync --extra dev
-uv run pytest
+uv run pytest --basetemp .test-tmp
+uv run python scripts/run_fixture.py
+uv run python scripts/run_mutation_checks.py
 ```
 
-The core API is:
-
-```python
-from battery_dispatch import BatteryConfig, solve_window
-
-asset = BatteryConfig(
-    generation_loss_factor=0.98,  # use the published asset/FY value
-    load_loss_factor=1.01,
-)
-window = solve_window(prices, asset, soc_initial=asset.initial_soc_mwh)
-```
-
-To download one period, run the rolling policy, settle it, and write outputs:
+Run the reference financial year:
 
 ```powershell
 uv run battery-dispatch `
   --start "2022-07-01 00:00" `
   --end "2023-07-01 00:00" `
   --region SA1 `
-  --generation-mlf 0.98 `
-  --load-mlf 1.01 `
-  --mlf-source "AEMO MLF report, asset connection point, FY2022-23"
+  --connection-point "Hornsdale 275 kV" `
+  --loss-factor-file config/loss_factors.csv `
+  --degradation-cost 25
 ```
 
-`--start` and `--end` are physical period boundaries. Because AEMO records are
-interval-ending, the example loads timestamps `(2022-07-01 00:00,
-2023-07-01 00:00]`: the first row is 00:05 and the last is 00:00 at the next
-financial-year boundary.
+Run the declared endpoint/degradation sensitivity grid:
 
-NEMOSIS is called only for missing `(table, region, month)` partitions. Curated
-files live under `data/cache/partitions`; `manifest.jsonl` records fetch time and
-row count. A cache hit reads parquet without invoking NEMOSIS or touching the
-network.
+```powershell
+uv run python scripts/run_reference_sensitivities.py
+```
 
-One interval-level `dispatch_<config hash>.csv` is written per run. Summary rows
-are upserted in `results.csv`, keyed by that hash. Plot helpers read those files,
-not in-memory model state.
-The summary includes June-2022 event revenue and total revenue excluding that
-event, plus both period and annualised $/MW and cycle metrics.
+The price downloader calls NEMOSIS only for missing physical-calendar-month
+partitions. Outputs are interval CSVs plus a config-keyed summary CSV. Inputs
+fail closed on gaps, duplicates, intervention rows, unknown dated price caps or
+incomplete MLF provenance.
 
-`run_parameter_sweep(...)` accepts any requested region list, annual MLF tables,
-and degradation-cost grid, then executes and writes every region/FY/cost run.
-The repository does not invent asset MLFs: published values for the connection
-point under study must be supplied explicitly.
+## Repository map
 
-## Validation suite
+```text
+config/              reference asset, MLF schedule, external benchmarks
+data/manifests/       committed data identities and quality evidence
+docs/                 data contract, validation, results and benchmark policy
+src/data.py           NEMOSIS download, partition cache, ingest checks
+src/mlf.py            provenance-preserving annual MLF ingestion
+src/battery.py        SOC physics and feasibility checks
+src/settlement.py     authoritative loss-adjusted settlement calculation
+src/optimiser.py      linopy/HiGHS per-window MILP
+src/horizon.py        rolling-horizon policy and solver trace
+src/metrics.py        run summary and durable output
+src/validation.py     independent run and cycle audits
+src/sensitivity.py    endpoint/degradation scenarios
+src/benchmark.py      period/scope-aware external comparisons
+scripts/              deterministic fixture, mutations and sensitivity runner
+tests/                hand-worked, invariant and contract tests
+```
 
-The tests cover a hand-computed six-interval case, energy balance, flat prices,
-monotonicity in power/energy/degradation, negative-price exclusivity, SOC
-bounds, loss-factor break-even economics, timestamp/intervention handling,
-strict duplicate/gap/NaN/price-bound rejection, and the no-network cache-hit
-contract.
-
-The next validation step requiring external data is to plot one cached
-region-month against the corresponding AEMO chart, then compare annual $/MW
-energy revenue with named SA battery results in AEMO Quarterly Energy Dynamics.
+Detailed contracts and evidence are in [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md)
+and [`docs/VALIDATION.md`](docs/VALIDATION.md). The repository does not include
+the phase-5 publication/audit bundle, as requested.

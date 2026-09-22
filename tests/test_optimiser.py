@@ -99,11 +99,28 @@ def test_realised_revenue_is_non_increasing_in_degradation_cost() -> None:
     )
     prices = np.array([10, 12], dtype=float)
     low = solve_window(prices, battery, 0, deg_cost=0)
-    high = solve_window(prices, battery, 0, deg_cost=3)
-    assert objective_revenue(high, prices, battery, 3) <= objective_revenue(
+    high = solve_window(prices, battery, 0, deg_cost=5)
+    assert objective_revenue(high, prices, battery, 5) <= objective_revenue(
         low, prices, battery, 0
     )
     assert high.discharge_mw.sum() <= low.discharge_mw.sum()
+
+
+def test_soc_initial_clips_solver_scale_roundoff_only() -> None:
+    battery = BatteryConfig(
+        generation_loss_factor=1,
+        load_loss_factor=1,
+        power_mw=1,
+        energy_mwh=1,
+        round_trip_efficiency=1,
+        soc_min_fraction=0,
+        soc_max_fraction=1,
+        interval_minutes=60,
+    )
+    clipped = solve_window(np.array([0.0]), battery, 1.0 + 1e-12)
+    assert clipped.soc_initial_mwh == 1.0
+    with pytest.raises(ValueError, match="outside"):
+        solve_window(np.array([0.0]), battery, 1.0 + 1e-4)
 
 
 def test_core_policy_optimises_settled_loss_factor_cashflows() -> None:

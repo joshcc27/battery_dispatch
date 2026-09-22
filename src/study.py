@@ -24,6 +24,7 @@ def run_parameter_sweep(
     regions: Iterable[str] | None = None,
     window_hours: int = 48,
     step_hours: int = 24,
+    terminal_value_per_mwh: float = 0.0,
 ) -> pd.DataFrame:
     """Run every requested region/FY/degradation combination.
 
@@ -68,13 +69,22 @@ def run_parameter_sweep(
                     window_hours=window_hours,
                     step_hours=step_hours,
                     deg_cost=deg_cost,
+                    terminal_value_per_mwh=terminal_value_per_mwh,
                 )
                 revenue = settle(trace, annual_prices, asset, deg_cost=deg_cost)
                 run_hash = asset.config_hash(
-                    extra={"financial_year": fy, "degradation_cost": deg_cost}
+                    extra={
+                        "financial_year": fy,
+                        "degradation_cost": deg_cost,
+                        "terminal_value_per_mwh": terminal_value_per_mwh,
+                    }
                 )
                 summary = summarise_run(
-                    revenue, asset, config_hash=run_hash, region=region
+                    revenue,
+                    asset,
+                    config_hash=run_hash,
+                    region=region,
+                    terminal_value_per_mwh=terminal_value_per_mwh,
                 )
                 summary["degradation_cost_per_mwh"] = deg_cost
                 summaries.append(summary)

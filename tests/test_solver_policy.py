@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from battery_dispatch.config import AEST, BatteryConfig
+from battery_dispatch.horizon import run_rolling_horizon
+from battery_dispatch.optimiser import (
+    STRICT_SOLVER_POLICY,
+    THROUGHPUT_TIE_BREAKER_AUD_PER_MWH,
+    SolverPolicy,
+    solve_window,
+)
+from battery_dispatch.validation import assert_audit_passes, audit_dispatch
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from analyse_exclusivity_binding import binding_price_threshold  # noqa: E402
+
+
+def make_asset(**changes: float) -> BatteryConfig:
+    values = {
+        "generation_loss_factor": 0.9652,
+        "load_loss_factor": 0.9681,
+        "power_mw": 1.0,
+        "energy_mwh": 1.0,
+        "round_trip_efficiency": 0.87,
+        "soc_min_fraction": 0.0,
+        "soc_max_fraction": 1.0,
+        "interval_minutes": 60,
+    }
+    values.update(changes)
+    return BatteryConfig(**values)
+
+
+def test_policy_rejects_impossible_tolerances() -> None:
+    with pytest.raises(ValueError, match="mip_rel_gap"):
+        SolverPolicy(mip_rel_gap=0.0)
+    with pytest.raises(ValueError, match="mip_rel_gap"):
+        SolverPolicy(mip_rel_gap=1.0)
+    with pytest.raises(ValueError, match="time_limit_seconds"):
+        SolverPolicy(time_limit_seconds=0.0)
+
+
+def test_strict_policy_does_not_accept_time_limited_windows() -> None:
+    assert STRICT_SOLVER_POLICY.allows_time_limited_windows is False
+    assert STRICT_SOLVER_POLICY.gap_tolerance == pytest.approx(1.01e-6)
+    limited = SolverPolicy(mip_rel_gap=1e-3, time_limit_seconds=120.0)
+    assert limited.allows_time_limited_windows is True
+    assert limited.gap_tolerance == float("inf")
+
+
+def test_solve_window_reports_a_valid_optimality_bound() -> None:
+    battery = make_asset()
+    prices = np.array([10.0, 20.0, 100.0, 30.0], dtype=float)
+    result = solve_window(prices, battery, soc_initial=0.0)
+    # Maximisation: the dual bound can never sit below the objective HiGHS
+    # optimised, and the recorded absolute gap is exactly that distance.
+    assert result.solver_dual_bound >= result.solver_objective_value - 1e-6
+    assert result.solver_absolute_gap == pytest.approx(
+        abs(result.solver_dual_bound - result.solver_objective_value)
+    )
+    assert result.solver_time_limited is False
+
+    # The reported economic objective excludes the throughput tie-breaker, so
+    # it sits above the solved objective by exactly the throughput penalty.
+    throughput = float(result.charge_mw.sum() + result.discharge_mw.sum())
+    penalty = battery.interval_hours * THROUGHPUT_TIE_BREAKER_AUD_PER_MWH * throughput
+    assert result.objective_value - result.solver_objective_value == pytest.approx(
+        penalty, abs=1e-6
+    )
+
+
+def test_binding_threshold_predicts_when_exclusivity_pays() -> None:
+    """Simultaneous operation is only attractive below the derived threshold."""
+    battery = make_asset()
+    for deg_cost in (0.0, 25.0, 50.0):
+        threshold = binding_price_threshold(battery, deg_cost)
+        round_trip = battery.charge_efficiency * battery.discharge_efficiency
+        dt = battery.interval_hours
+
+        def simultaneous_value(price: float) -> float:
+            charge = -dt * battery.load_loss_factor * price
+            discharge = dt * (battery.generation_loss_factor * price - deg_cost)
+            return charge + discharge * round_trip
+
+        assert simultaneous_value(threshold - 1.0) > 0
+        assert simultaneous_value(threshold + 1.0) < 0
+    assert binding_price_threshold(make_asset(), 25.0) == pytest.approx(-169.42, abs=0.01)
+
+
+def test_time_limited_audit_is_refused_unless_the_policy_asked_for_it() -> None:
+    audit = {
+        "solver_all_optimal": False,
+        "solver_non_optimal_window_count": 2,
+        "solver_time_limited_window_count": 2,
+        "max_solver_mip_gap": 8e-4,
+    }
+    with pytest.raises(ValueError, match="non-optimal"):
+        assert_audit_passes(audit)
+    assert_audit_passes(audit, mip_gap_tolerance=1e-3, allow_time_limited=True)
+
+    # A window that ended non-optimal for any other reason is still a failure.
+    mixed = {**audit, "solver_non_optimal_window_count": 3}
+    with pytest.raises(ValueError, match="non-optimal"):
+        assert_audit_passes(mixed, mip_gap_tolerance=1e-3, allow_time_limited=True)
+
+    # The looser gap still has to be declared; it is not implied.
+    with pytest.raises(ValueError, match="MIP gap"):
+        assert_audit_passes(audit, allow_time_limited=True)
+
+
+def test_rolling_horizon_records_the_policy_it_was_given() -> None:
+    timestamps = pd.date_range("2023-01-01 00:05", periods=4, freq="5min", tz=AEST)
+    prices = pd.DataFrame({"settlementdate": timestamps, "rrp": [0.0, 90.0, 0.0, 90.0]})
+    battery = make_asset(interval_minutes=5, round_trip_efficiency=1.0)
+    trace = run_rolling_horizon(
+        prices,
+        battery,
+        soc_initial=0.0,
+        window_hours=1,
+        step_hours=1,
+        policy=SolverPolicy(mip_rel_gap=1e-3, time_limit_seconds=60.0),
+    )
+    for column in ("solver_dual_bound", "solver_absolute_gap", "solver_time_limited"):
+        assert column in trace
+    audit = audit_dispatch(trace, battery, soc_initial=0.0)
+    assert audit["solver_time_limited_window_count"] == 0
+    assert audit["total_solver_absolute_gap_aud"] >= 0.0
+    assert_audit_passes(audit, mip_gap_tolerance=1e-3, allow_time_limited=True)

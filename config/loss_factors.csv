@@ -1,0 +1,2 @@
+region,financial_year,connection_point,generation_duid,load_duid,generation_loss_factor,load_loss_factor,source_title,source_url,source_page
+SA1,2022-23,Hornsdale 275 kV,HPRG1,HPRL1,0.9652,0.9681,AEMO Marginal Loss Factors Financial Year 2022-23,https://www.aemo.com.au/-/media/files/electricity/nem/security_and_reliability/loss_factors_and_regional_boundaries/2022-23/marginal-loss-factors-for-the-2022-23-financial-year.pdf,34

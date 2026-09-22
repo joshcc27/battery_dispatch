@@ -1,0 +1,37 @@
+[asset]
+name = "100 MW / 200 MWh reference battery at Hornsdale connection point"
+region = "SA1"
+connection_point = "Hornsdale 275 kV"
+power_mw = 100.0
+energy_mwh = 200.0
+round_trip_efficiency = 0.87
+soc_min_fraction = 0.05
+soc_max_fraction = 0.95
+initial_soc_policy = "minimum"
+
+[optimisation]
+interval_minutes = 5
+window_hours = 48
+step_hours = 24
+terminal_soc_equality = false
+
+[scope]
+energy_only = true
+fcas = false
+contracts = false
+network_revenue = false
+ramp_constraints = false
+
+[degradation]
+scenario_costs_per_discharge_mwh = [0.0, 25.0, 50.0]
+headline_cost_per_discharge_mwh = 25.0
+note = "Illustrative economic sensitivities; replace with project-specific cell warranty and augmentation assumptions."
+
+[endpoint_sensitivity]
+cases = [
+  "minimum SOC, no look-ahead salvage value",
+  "midpoint SOC, no look-ahead salvage value",
+  "minimum SOC, AUD 100/MWh look-ahead salvage value",
+]
+headline_case = "minimum SOC, no look-ahead salvage value"
+note = "The salvage value applies at each rolling optimisation horizon and tests look-ahead edge effects; it is not booked as cash revenue."

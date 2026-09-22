@@ -104,6 +104,7 @@ class BatteryConfig:
     soc_max_fraction: float = 0.95
     interval_minutes: int = 5
     region: str = "SA1"
+    connection_point: str | None = None
     loss_factor_table: LossFactorTable | None = None
     loss_factor_source: str | None = None
 

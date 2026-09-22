@@ -18,6 +18,8 @@ def summarise_run(
     *,
     config_hash: str,
     region: str | None = None,
+    initial_soc_mwh: float | None = None,
+    terminal_value_per_mwh: float = 0.0,
 ) -> dict[str, object]:
     """Calculate industry-standard revenue, cycling, and concentration metrics."""
     data = result.intervals
@@ -54,6 +56,9 @@ def summarise_run(
         else pd.Series(False, index=data.index)
     )
     event_revenue = float(data.loc[event, "total_revenue"].sum())
+    initial_soc = asset.initial_soc_mwh if initial_soc_mwh is None else float(initial_soc_mwh)
+    terminal_soc = float(data["soc_mwh"].iloc[-1])
+    inventory_value_change = (terminal_soc - initial_soc) * terminal_value_per_mwh
     summary: dict[str, object] = {
         "config_hash": config_hash,
         "region": region or asset.region,
@@ -61,16 +66,28 @@ def summarise_run(
         "total_revenue": total,
         "energy_revenue": result.energy_revenue,
         "degradation_cost": result.degradation_cost,
+        "power_mw": asset.power_mw,
+        "energy_mwh": asset.energy_mwh,
         "period_hours": hours,
         "annualisation_factor": annualisation_factor,
         "revenue_per_mw_period": total / asset.power_mw,
         "revenue_per_mw_year": total / asset.power_mw * annualisation_factor,
+        "energy_revenue_per_mw_year": (
+            result.energy_revenue / asset.power_mw * annualisation_factor
+        ),
+        "net_revenue_per_mw_year": total / asset.power_mw * annualisation_factor,
         "equivalent_full_cycles": discharge_mwh / asset.energy_mwh,
         "equivalent_full_cycles_per_year": (
             discharge_mwh / asset.energy_mwh * annualisation_factor
         ),
         "june_2022_event_revenue": event_revenue,
         "total_revenue_excluding_june_2022": total - event_revenue,
+        "initial_soc_mwh": initial_soc,
+        "terminal_soc_mwh": terminal_soc,
+        "net_inventory_change_mwh": terminal_soc - initial_soc,
+        "terminal_value_per_mwh": terminal_value_per_mwh,
+        "inventory_value_change": inventory_value_change,
+        "cash_plus_inventory_value_change": total + inventory_value_change,
         "volume_weighted_charge_price": charge_price,
         "volume_weighted_discharge_price": discharge_price,
         "realised_spread": discharge_price - charge_price,

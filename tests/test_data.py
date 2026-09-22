@@ -87,3 +87,30 @@ def test_cache_hit_never_calls_compiler(tmp_path) -> None:
     assert calls == 1
     pd.testing.assert_frame_equal(first.reset_index(drop=True), second.reset_index(drop=True))
     assert cache.manifest_path.exists()
+
+
+def test_cache_interval_ending_range_across_financial_year(tmp_path) -> None:
+    timestamps = pd.DatetimeIndex(
+        [pd.Timestamp("2023-07-01 00:00"), pd.Timestamp("2023-07-01 00:05")]
+    )
+
+    def compiler(*args, **kwargs):
+        return pd.DataFrame(
+            {
+                "SETTLEMENTDATE": timestamps,
+                "REGIONID": "SA1",
+                "RRP": [100.0, 100.0],
+                "INTERVENTION": 0,
+            }
+        )
+
+    result = MarketDataCache(tmp_path).fetch_prices(
+        pd.Timestamp("2023-06-30 23:55", tz=AEST),
+        pd.Timestamp("2023-07-01 00:05", tz=AEST),
+        ["SA1"],
+        compiler=compiler,
+    )
+    assert result["settlementdate"].tolist() == [
+        pd.Timestamp("2023-07-01 00:00", tz=AEST),
+        pd.Timestamp("2023-07-01 00:05", tz=AEST),
+    ]
