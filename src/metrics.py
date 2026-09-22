@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 import numpy as np
 import pandas as pd
@@ -50,12 +50,6 @@ def summarise_run(
     width = asset.usable_energy_mwh
     decile = np.floor((data["soc_mwh"] - minimum) / width * 10).clip(0, 9).astype(int)
     decile_shares = decile.value_counts(normalize=True)
-    event = (
-        data["june_2022_event"].fillna(False).astype(bool)
-        if "june_2022_event" in data
-        else pd.Series(False, index=data.index)
-    )
-    event_revenue = float(data.loc[event, "total_revenue"].sum())
     initial_soc = asset.initial_soc_mwh if initial_soc_mwh is None else float(initial_soc_mwh)
     terminal_soc = float(data["soc_mwh"].iloc[-1])
     inventory_value_change = (terminal_soc - initial_soc) * terminal_value_per_mwh
@@ -80,8 +74,6 @@ def summarise_run(
         "equivalent_full_cycles_per_year": (
             discharge_mwh / asset.energy_mwh * annualisation_factor
         ),
-        "june_2022_event_revenue": event_revenue,
-        "total_revenue_excluding_june_2022": total - event_revenue,
         "initial_soc_mwh": initial_soc,
         "terminal_soc_mwh": terminal_soc,
         "net_inventory_change_mwh": terminal_soc - initial_soc,

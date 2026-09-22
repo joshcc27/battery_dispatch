@@ -94,10 +94,7 @@ def _price_frame(prices: pd.DataFrame | pd.Series) -> pd.DataFrame:
         raise ValueError(f"Prices are missing columns: {sorted(missing)}")
     if result["settlementdate"].duplicated().any():
         raise ValueError("Prices contain duplicate settlement timestamps")
-    columns = ["settlementdate", "rrp"]
-    if "june_2022_event" in result:
-        columns.append("june_2022_event")
-    return result[columns]
+    return result[["settlementdate", "rrp"]]
 
 
 def settle(
@@ -169,6 +166,10 @@ def break_even_discharge_price(
 ) -> float:
     """Minimum discharge RRP for a marginal complete cycle."""
     eta_rt = asset.charge_efficiency * asset.discharge_efficiency
-    factors = asset.loss_factors if settlementdate is None else asset.loss_factors_for(settlementdate)
+    factors = (
+        asset.loss_factors
+        if settlementdate is None
+        else asset.loss_factors_for(settlementdate)
+    )
     energy_term = factors.load * charge_price / (factors.generation * eta_rt)
     return energy_term + deg_cost / factors.generation

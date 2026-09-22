@@ -54,8 +54,8 @@ def binding_price_threshold(asset: BatteryConfig, deg_cost: float) -> float:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache", type=Path, default=Path("data/cache"))
-    parser.add_argument("--start", default="2022-07-01 00:00")
-    parser.add_argument("--end", default="2023-07-01 00:00")
+    parser.add_argument("--start", default="2022-11-01 00:00")
+    parser.add_argument("--end", default="2022-12-01 00:00")
     parser.add_argument("--region", default="SA1")
     parser.add_argument("--financial-year", default="2022-23")
     parser.add_argument("--worst-days", type=int, default=6)

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Mapping
+from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
 
-from .battery import energy_balance_residual, soc_path
+from .battery import (
+    SOLVER_INTEGRALITY_TOLERANCE,
+    energy_balance_residual,
+    soc_path,
+)
 from .config import AEST, BatteryConfig
 
 
@@ -44,11 +48,6 @@ def audit_prices(
         actual = pd.DatetimeIndex(group["settlementdate"])
         missing_count += len(expected.difference(actual))
         unexpected_count += len(actual.difference(expected))
-    event_count = (
-        int(frame["june_2022_event"].fillna(False).astype(bool).sum())
-        if "june_2022_event" in frame
-        else 0
-    )
     return {
         "price_row_count": len(frame),
         "expected_price_row_count_per_region": len(expected),
@@ -60,7 +59,6 @@ def audit_prices(
         "price_max_timestamp": frame["settlementdate"].max().isoformat(),
         "rrp_min": float(frame["rrp"].min()),
         "rrp_max": float(frame["rrp"].max()),
-        "june_2022_event_interval_count": event_count,
         "price_sha256": dataframe_sha256(
             frame, ["settlementdate", "regionid", "rrp"]
         ),
@@ -94,8 +92,14 @@ def audit_dispatch(
         ),
         "soc_min_observed_mwh": float(soc.min()),
         "soc_max_observed_mwh": float(soc.max()),
-        "max_simultaneous_charge_discharge_mw2": float(
-            np.max(charge * discharge)
+        # min(charge, discharge) in MW, not the product: see validate_dispatch_trace.
+        "max_simultaneous_charge_discharge_mw": float(
+            np.max(np.minimum(charge, discharge))
+        ),
+        # The same quantity as a fraction of the power rating, which is what the
+        # gate tests so that one tolerance is meaningful at any asset size.
+        "max_simultaneous_dispatch_fraction": float(
+            np.max(np.minimum(charge, discharge)) / asset.power_mw
         ),
         "max_charge_mw": float(charge.max()),
         "max_discharge_mw": float(discharge.max()),
@@ -131,10 +135,19 @@ def audit_dispatch(
             if "solver_absolute_gap" in trace
             else np.nan
         ),
-        "solver_time_limited_window_count": (
-            int(trace.groupby("window_id")["solver_time_limited"].first().sum())
-            if "solver_time_limited" in trace
+        # Windows whose exclusivity binaries were all proven redundant solve as
+        # pure LPs and report a zero gap exactly, not approximately.
+        "pure_lp_window_count": (
+            int(
+                trace.groupby("window_id")["exclusivity_binary_count"].first().eq(0).sum()
+            )
+            if "exclusivity_binary_count" in trace
             else 0
+        ),
+        "total_exclusivity_binary_count": (
+            int(trace.groupby("window_id")["exclusivity_binary_count"].first().sum())
+            if "exclusivity_binary_count" in trace
+            else np.nan
         ),
         "solver_non_optimal_window_count": (
             int(
@@ -146,49 +159,59 @@ def audit_dispatch(
     }
 
 
+PRICE_AUDIT_KEYS = (
+    "price_duplicate_count",
+    "price_missing_interval_count",
+    "price_unexpected_interval_count",
+)
+
+DISPATCH_AUDIT_KEYS = (
+    "energy_balance_residual_mwh",
+    "max_interval_energy_balance_error_mwh",
+    "max_simultaneous_dispatch_fraction",
+    "solver_all_optimal",
+    "max_solver_mip_gap",
+    "completed_cycle_break_even_violation_count",
+)
+
+
 def assert_audit_passes(
     audit: Mapping[str, object],
     *,
     energy_tolerance: float = 1e-6,
-    exclusivity_tolerance: float = 1e-8,
+    exclusivity_tolerance: float = SOLVER_INTEGRALITY_TOLERANCE,
     mip_gap_tolerance: float = 1.01e-6,
-    allow_time_limited: bool = False,
+    require_price_audit: bool = False,
 ) -> None:
     """Fail a run that misses any declared gate.
 
-    ``allow_time_limited`` accepts windows that HiGHS stopped at a requested
-    time limit, and only those; a window that ended non-optimal for any other
-    reason still fails. It is used by the documented A$0/MWh degradation
-    scenario and must be paired with an explicit ``mip_gap_tolerance``.
+    A gate whose key is absent is a missing check, not a passing one, so the
+    required keys are asserted before any of them is evaluated. Callers that
+    merged :func:`audit_prices` set ``require_price_audit`` to gate the inputs
+    as well; callers that settle against already-audited prices do not.
     """
+    required = list(DISPATCH_AUDIT_KEYS)
+    if require_price_audit:
+        required += list(PRICE_AUDIT_KEYS)
+    if absent := [key for key in required if key not in audit]:
+        raise ValueError(f"Run audit is incomplete, missing: {sorted(absent)}")
+
     failures: list[str] = []
-    for field in (
-        "price_duplicate_count",
-        "price_missing_interval_count",
-        "price_unexpected_interval_count",
-    ):
-        if field in audit and int(audit[field]) != 0:
-            failures.append(f"{field}={audit[field]}")
-    if abs(float(audit.get("energy_balance_residual_mwh", 0.0))) > energy_tolerance:
+    if require_price_audit:
+        for field in PRICE_AUDIT_KEYS:
+            if int(audit[field]) != 0:
+                failures.append(f"{field}={audit[field]}")
+    if abs(float(audit["energy_balance_residual_mwh"])) > energy_tolerance:
         failures.append("aggregate energy balance")
-    if float(audit.get("max_interval_energy_balance_error_mwh", 0.0)) > energy_tolerance:
+    if float(audit["max_interval_energy_balance_error_mwh"]) > energy_tolerance:
         failures.append("interval energy balance")
-    if (
-        float(audit.get("max_simultaneous_charge_discharge_mw2", 0.0))
-        > exclusivity_tolerance
-    ):
+    if float(audit["max_simultaneous_dispatch_fraction"]) > exclusivity_tolerance:
         failures.append("charge/discharge exclusivity")
-    if "solver_all_optimal" in audit and not bool(audit["solver_all_optimal"]):
-        non_optimal = int(audit.get("solver_non_optimal_window_count", 0))
-        time_limited = int(audit.get("solver_time_limited_window_count", 0))
-        if not allow_time_limited or non_optimal != time_limited or time_limited == 0:
-            failures.append("non-optimal solver window")
-    if (
-        "max_solver_mip_gap" in audit
-        and float(audit["max_solver_mip_gap"]) > mip_gap_tolerance
-    ):
+    if not bool(audit["solver_all_optimal"]):
+        failures.append("non-optimal solver window")
+    if float(audit["max_solver_mip_gap"]) > mip_gap_tolerance:
         failures.append("solver MIP gap")
-    if int(audit.get("completed_cycle_break_even_violation_count", 0)) != 0:
+    if int(audit["completed_cycle_break_even_violation_count"]) != 0:
         failures.append("completed-cycle break-even")
     if failures:
         raise ValueError("Run audit failed: " + ", ".join(failures))

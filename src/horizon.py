@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
-import numpy as np
 import pandas as pd
 
 from .battery import validate_dispatch_trace
 from .config import BatteryConfig
-from .optimiser import STRICT_SOLVER_POLICY, DispatchWindow, SolverPolicy, solve_window
+from .optimiser import (
+    STRICT_SOLVER_POLICY,
+    DispatchWindow,
+    SolverPolicy,
+    solve_window,
+)
 
 
 def _normalise_prices(prices: pd.DataFrame | pd.Series) -> pd.DataFrame:
@@ -48,8 +52,7 @@ def run_rolling_horizon(
     MLFs are applied later by settlement and do not enter the core optimiser.
 
     ``progress`` is called after each window with its ID, start timestamp and
-    solved result. A long run under a loose policy is otherwise silent for
-    hours, which makes a pathological window impossible to spot.
+    solved result, so a run can report which window it is on.
     """
     frame = _normalise_prices(prices)
     intervals_per_hour = 60 // asset.interval_minutes
@@ -85,7 +88,7 @@ def run_rolling_horizon(
         part["solver_mip_gap"] = result.solver_mip_gap
         part["solver_dual_bound"] = result.solver_dual_bound
         part["solver_absolute_gap"] = result.solver_absolute_gap
-        part["solver_time_limited"] = result.solver_time_limited
+        part["exclusivity_binary_count"] = result.exclusivity_binary_count
         part["window_start"] = window["settlementdate"].iloc[0]
         part["window_end"] = window["settlementdate"].iloc[-1]
         part["window_initial_soc_mwh"] = current_soc

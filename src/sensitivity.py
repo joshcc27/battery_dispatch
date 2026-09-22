@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Callable, Iterable
 
 import pandas as pd
 
@@ -62,8 +62,7 @@ def run_sensitivities(
                     "initial_soc_mwh": endpoint.initial_soc_mwh,
                     "terminal_value_per_mwh": endpoint.terminal_value_per_mwh,
                     "degradation_cost": float(degradation_cost),
-                    "mip_rel_gap": policy.mip_rel_gap,
-                    "time_limit_seconds": policy.time_limit_seconds,
+                    "solver_policy": policy.describe(),
                 }
             )
             summary = summarise_run(
@@ -75,12 +74,7 @@ def run_sensitivities(
             )
             summary["endpoint_case"] = endpoint.name
             summary["degradation_cost_per_mwh"] = float(degradation_cost)
-            summary["mip_rel_gap_requested"] = policy.mip_rel_gap
-            summary["window_time_limit_seconds"] = (
-                policy.time_limit_seconds
-                if policy.time_limit_seconds is not None
-                else float("nan")
-            )
+            summary["solver_policy"] = policy.label
             audit = {
                 **audit_dispatch(trace, asset, soc_initial=endpoint.initial_soc_mwh),
                 **audit_completed_cycles(
@@ -90,11 +84,7 @@ def run_sensitivities(
                     initial_soc_mwh=endpoint.initial_soc_mwh,
                 ),
             }
-            assert_audit_passes(
-                audit,
-                mip_gap_tolerance=policy.gap_tolerance,
-                allow_time_limited=policy.allows_time_limited_windows,
-            )
+            assert_audit_passes(audit, mip_gap_tolerance=policy.gap_tolerance)
             summary.update(audit)
             rows.append(summary)
     return pd.DataFrame(rows)

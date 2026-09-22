@@ -11,47 +11,44 @@ import pandas as pd
 
 from .battery import energy_balance_residual
 from .config import BatteryConfig
-from .settlement import settlement_coefficients
-
+from .settlement import SettlementCoefficients, settlement_coefficients
 
 # A secondary numerical preference, not a reported degradation or settlement
 # cost. It removes economically indifferent cycling/branching while being less
 # than or equal to one cent per 100 MWh of throughput.
 THROUGHPUT_TIE_BREAKER_AUD_PER_MWH = 1e-4
+
+
 SOLVER_RELATIVE_MIP_GAP = 1e-6
 
 
 @dataclass(frozen=True)
 class SolverPolicy:
-    """Per-scenario solver tolerances and what the audit will accept.
+    """The solver tolerance a scenario declares and the audit enforces.
 
-    The default is the strict policy used for every reported result except the
-    A$0/MWh degradation scenario, where exclusivity binds at 23% of intervals
-    and proving a 1e-6 relative gap is not tractable. See docs/VALIDATION.md.
+    Every reported scenario uses the strict default. The exclusivity reduction
+    in :func:`exclusivity_binding_mask` keeps the reference month tractable at
+    this gap; see docs/VALIDATION.md.
     """
 
     mip_rel_gap: float = SOLVER_RELATIVE_MIP_GAP
-    time_limit_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if not 0 < self.mip_rel_gap < 1:
             raise ValueError("mip_rel_gap must be in (0, 1)")
-        if self.time_limit_seconds is not None and self.time_limit_seconds <= 0:
-            raise ValueError("time_limit_seconds must be positive when set")
-
-    @property
-    def allows_time_limited_windows(self) -> bool:
-        return self.time_limit_seconds is not None
 
     @property
     def gap_tolerance(self) -> float:
-        """The largest achieved relative gap the audit will accept.
+        """The largest achieved relative gap the audit will accept."""
+        return 1.01 * self.mip_rel_gap
 
-        A window stopped by the time limit can report a gap wider than the
-        requested tolerance, so a time-limited policy is audited on the gap
-        actually achieved and recorded, not on the one requested.
-        """
-        return float("inf") if self.allows_time_limited_windows else 1.01 * self.mip_rel_gap
+    @property
+    def label(self) -> str:
+        return f"fixed {self.mip_rel_gap:g}"
+
+    def describe(self) -> dict[str, object]:
+        """The policy's identity for a run's config hash."""
+        return {"kind": "fixed", "mip_rel_gap": self.mip_rel_gap}
 
 
 STRICT_SOLVER_POLICY = SolverPolicy()
@@ -76,7 +73,9 @@ class DispatchWindow:
     solver_objective_value: float
     solver_dual_bound: float
     solver_absolute_gap: float
-    solver_time_limited: bool
+    # How many intervals kept an exclusivity binary. The rest were proven
+    # redundant by ``exclusivity_binding_mask`` and dropped from the MILP.
+    exclusivity_binary_count: int
 
     @property
     def soc_final_mwh(self) -> float:
@@ -94,6 +93,34 @@ class DispatchWindow:
                 "soc_mwh": self.soc_mwh,
             }
         )
+
+
+def exclusivity_binding_mask(
+    cashflows: SettlementCoefficients,
+    asset: BatteryConfig,
+    *,
+    margin: float = 1e-9,
+) -> np.ndarray:
+    """Return which intervals still need an exclusivity binary.
+
+    Shifting a solution that charges ``c`` and discharges ``d`` in one interval
+    by ``-a`` on charge and ``-a * eta_c * eta_d`` on discharge leaves the whole
+    SOC path unchanged, so the objective moves by ``-a * (A_c + eta_rt * A_d)``
+    using only this interval's settled coefficients. Where that bracket is
+    strictly negative, simultaneous operation is strictly dominated in every
+    optimal solution, so the binary is redundant rather than merely slack and
+    can be dropped without changing the optimum.
+
+    The bracket is evaluated directly instead of via the equivalent price
+    threshold ``p < -6.776 * deg``, so dated loss factors and an adverse sign of
+    ``L - G * eta_rt`` are both handled without rearrangement.
+    See docs/VALIDATION.md.
+    """
+    eta_rt = asset.charge_efficiency * asset.discharge_efficiency
+    burn_value = (
+        cashflows.charge_value_per_mw + eta_rt * cashflows.discharge_value_per_mw
+    )
+    return np.asarray(burn_value >= -margin)
 
 
 def solve_window(
@@ -144,12 +171,30 @@ def solve_window(
         coords=[intervals],
         name="soc_mwh",
     )
-    mode = model.add_variables(binary=True, coords=[intervals], name="charge_mode")
-
-    model.add_constraints(charge <= asset.power_mw * mode, name="charge_mode_limit")
-    model.add_constraints(
-        discharge <= asset.power_mw * (1 - mode), name="discharge_mode_limit"
+    cashflows = settlement_coefficients(
+        price,
+        asset,
+        settlementdate=settlementdate,
+        deg_cost=deg_cost,
     )
+    # One binary per interval is redundant: simultaneous charge and discharge is
+    # strictly dominated wherever burning energy does not pay, which is all but
+    # 0.55% of FY2022-23 intervals at the headline A$25/MWh degradation cost.
+    binding = exclusivity_binding_mask(cashflows, asset)
+    binding_positions = np.flatnonzero(binding)
+    if len(binding_positions):
+        binding_index = pd.Index(binding_positions, name="interval")
+        mode = model.add_variables(
+            binary=True, coords=[binding_index], name="charge_mode"
+        )
+        model.add_constraints(
+            charge.sel(interval=binding_index) <= asset.power_mw * mode,
+            name="charge_mode_limit",
+        )
+        model.add_constraints(
+            discharge.sel(interval=binding_index) <= asset.power_mw * (1 - mode),
+            name="discharge_mode_limit",
+        )
     eta_c = asset.charge_efficiency
     eta_d = asset.discharge_efficiency
     dt = asset.interval_hours
@@ -165,12 +210,6 @@ def solve_window(
             name="soc_balance",
         )
 
-    cashflows = settlement_coefficients(
-        price,
-        asset,
-        settlementdate=settlementdate,
-        deg_cost=deg_cost,
-    )
     objective = (
         cashflows.discharge_value_per_mw * discharge
         + cashflows.charge_value_per_mw * charge
@@ -184,28 +223,30 @@ def solve_window(
         "output_flag": False,
         "mip_rel_gap": policy.mip_rel_gap,
     }
-    if policy.time_limit_seconds is not None:
-        solver_options["time_limit"] = float(policy.time_limit_seconds)
     solve_started = perf_counter()
     status, termination = model.solve(**solver_options)
     solve_seconds = perf_counter() - solve_started
     termination_text = str(termination).lower()
-    # A time-limited window is accepted only when the policy asked for a time
-    # limit. Everything else, including a silently truncated solve, still fails.
-    accepted = {"optimal"}
-    if policy.allows_time_limited_windows:
-        accepted.add("time_limit")
-    if str(status).lower() != "ok" or termination_text not in accepted:
+    if str(status).lower() != "ok" or termination_text != "optimal":
         raise RuntimeError(f"HiGHS failed: status={status}, termination={termination}")
-    time_limited = termination_text != "optimal"
     info = model.solver_model.getInfo()
-    solver_mip_gap = float(info.mip_gap)
-    # HiGHS reports both in its own objective sense, so the difference is a
-    # valid absolute optimality gap regardless of how linopy flipped the sign.
-    solver_dual_bound = float(info.mip_dual_bound)
     solver_objective_value = float(info.objective_function_value)
-    solver_absolute_gap = abs(solver_dual_bound - solver_objective_value)
-    if not np.isfinite([solver_mip_gap, solver_dual_bound, solver_absolute_gap]).all():
+    if len(binding_positions):
+        solver_mip_gap = float(info.mip_gap)
+        # HiGHS reports both in its own objective sense, so the difference is a
+        # valid absolute optimality gap regardless of how linopy flipped the sign.
+        solver_dual_bound = float(info.mip_dual_bound)
+        solver_absolute_gap = abs(solver_dual_bound - solver_objective_value)
+    else:
+        # Every binary was proven redundant, so HiGHS solved a pure LP. Its
+        # simplex optimum is exact and there is no branch-and-bound gap; the
+        # mip_* fields are undefined for an LP and must not be read.
+        solver_mip_gap = 0.0
+        solver_dual_bound = solver_objective_value
+        solver_absolute_gap = 0.0
+    if not np.isfinite(
+        [solver_mip_gap, solver_dual_bound, solver_objective_value, solver_absolute_gap]
+    ).all():
         raise RuntimeError("HiGHS returned a non-finite optimality bound")
 
     def clean(values: np.ndarray) -> np.ndarray:
@@ -216,6 +257,12 @@ def solve_window(
     charge_values = clean(charge.solution.to_numpy())
     discharge_values = clean(discharge.solution.to_numpy())
     soc_values = clean(soc.solution.to_numpy())
+    if not (
+        np.isfinite(charge_values).all()
+        and np.isfinite(discharge_values).all()
+        and np.isfinite(soc_values).all()
+    ):
+        raise RuntimeError("HiGHS returned a non-finite dispatch solution")
     residual = energy_balance_residual(
         charge_values,
         discharge_values,
@@ -243,5 +290,6 @@ def solve_window(
         solver_objective_value=solver_objective_value,
         solver_dual_bound=solver_dual_bound,
         solver_absolute_gap=solver_absolute_gap,
-        solver_time_limited=time_limited,
+        exclusivity_binary_count=int(len(binding_positions)),
     )
+

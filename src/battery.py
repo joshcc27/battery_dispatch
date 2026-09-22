@@ -7,6 +7,12 @@ import pandas as pd
 
 from .config import BatteryConfig
 
+# HiGHS declares a binary integral within this tolerance, so a mode variable
+# sitting at 1 - 1e-6 permits up to power_mw * 1e-6 on the leg that is meant to
+# be off. That residue is a solver artefact, not dispatch, and the exclusivity
+# gate is scaled by the power rating so it means the same thing on a 1 MW test
+# asset and a 100 MW reference asset.
+SOLVER_INTEGRALITY_TOLERANCE = 1e-6
 
 REQUIRED_TRACE_COLUMNS = {
     "settlementdate",
@@ -76,7 +82,14 @@ def validate_dispatch_trace(
         discharge > asset.power_mw + tolerance
     ):
         raise ValueError("Dispatch exceeds the asset power rating")
-    if np.any(charge * discharge > tolerance):
+    # Tested as min(charge, discharge) in MW rather than the product: a product
+    # carries units of MW^2, so its sensitivity scales with the square of the
+    # power rating and the same solver slack that passes on a 1 MW test asset
+    # fails on a 100 MW one.
+    exclusivity_tolerance = max(
+        tolerance, asset.power_mw * SOLVER_INTEGRALITY_TOLERANCE
+    )
+    if np.any(np.minimum(charge, discharge) > exclusivity_tolerance):
         raise ValueError("Simultaneous charging and discharging detected")
     if np.any(soc < asset.soc_min_mwh - tolerance) or np.any(
         soc > asset.soc_max_mwh + tolerance

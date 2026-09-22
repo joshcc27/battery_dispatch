@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from battery_dispatch.config import AEST
-from battery_dispatch.data import MarketDataCache, validate_context, validate_prices
+from battery_dispatch.data import MarketDataCache, validate_prices
 
 
 def rows(prices=(10.0, 20.0, 30.0)) -> pd.DataFrame:
@@ -26,19 +26,6 @@ def test_filters_intervention_and_flags_aest() -> None:
     assert str(result["settlementdate"].dt.tz) == "AEST"
 
 
-def test_june_2022_event_includes_suspension_end() -> None:
-    frame = pd.DataFrame(
-        {
-            "SETTLEMENTDATE": ["2022-06-24 13:55", "2022-06-24 14:00", "2022-06-24 14:05"],
-            "REGIONID": "SA1",
-            "RRP": 100.0,
-            "INTERVENTION": 0,
-        }
-    )
-    result = validate_prices(frame)
-    assert result["june_2022_event"].tolist() == [True, True, False]
-
-
 def test_rejects_duplicate_gap_nan_and_out_of_bounds() -> None:
     with pytest.raises(ValueError, match="Duplicate"):
         validate_prices(pd.concat([rows(), rows().iloc[[1]]], ignore_index=True))
@@ -52,18 +39,11 @@ def test_rejects_duplicate_gap_nan_and_out_of_bounds() -> None:
         validate_prices(rows((10, 16_000, 20)))
 
 
-def test_explicit_range_catches_missing_boundary_and_context_is_filtered() -> None:
+def test_explicit_range_catches_missing_boundary() -> None:
     start = pd.Timestamp("2022-01-01 00:00", tz=AEST)
     end = pd.Timestamp("2022-01-01 00:15", tz=AEST)
     with pytest.raises(ValueError, match="gaps"):
         validate_prices(rows().iloc[1:], expected_start=start, expected_end=end)
-    context = rows().rename(columns={"RRP": "TOTALDEMAND"})
-    context["AVAILABLEGENERATION"] = [100, 110, 120]
-    intervention = context.iloc[[1]].assign(INTERVENTION=1)
-    result = validate_context(
-        pd.concat([context, intervention]), expected_start=start, expected_end=end
-    )
-    assert len(result) == 3
 
 
 def test_cache_hit_never_calls_compiler(tmp_path) -> None:

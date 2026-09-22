@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MUTATIONS = [
@@ -32,9 +31,28 @@ MUTATIONS = [
     (
         "binary exclusivity",
         "optimiser.py",
-        "mode = model.add_variables(binary=True, coords=[intervals], name=\"charge_mode\")",
-        "mode = model.add_variables(lower=0.0, upper=1.0, coords=[intervals], name=\"charge_mode\")",
+        "binary=True, coords=[binding_index], name=\"charge_mode\"",
+        "lower=0.0, upper=1.0, coords=[binding_index], name=\"charge_mode\"",
         ["tests/test_optimiser.py::test_energy_balance_soc_bounds_and_negative_price_binary"],
+    ),
+    (
+        "exclusivity binary elimination",
+        "optimiser.py",
+        "return np.asarray(burn_value >= -margin)",
+        "return np.zeros(len(burn_value), dtype=bool)",
+        [
+            "tests/test_optimiser.py::test_energy_balance_soc_bounds_and_negative_price_binary",
+            "tests/test_exclusivity_reduction.py::test_reduced_model_still_forbids_simultaneous_operation",
+        ],
+    ),
+    (
+        "audit gate completeness",
+        "validation.py",
+        'raise ValueError(f"Run audit is incomplete, missing: {sorted(absent)}")',
+        "pass",
+        [
+            "tests/test_validation.py::test_a_missing_gate_is_a_failure_not_a_pass",
+        ],
     ),
     (
         "settlement sign",
@@ -53,8 +71,10 @@ MUTATIONS = [
     (
         "intervention filter",
         "data.py",
-        "frame[\"rrp\"] = pd.to_numeric(frame[\"rrp\"], errors=\"raise\")\n    frame = frame.loc[frame[\"intervention\"] == 0].copy()",
-        "frame[\"rrp\"] = pd.to_numeric(frame[\"rrp\"], errors=\"raise\")\n    frame = frame.loc[frame[\"intervention\"] == 1].copy()",
+        'frame["rrp"] = pd.to_numeric(frame["rrp"], errors="raise")\n'
+        '    frame = frame.loc[frame["intervention"] == 0].copy()',
+        'frame["rrp"] = pd.to_numeric(frame["rrp"], errors="raise")\n'
+        '    frame = frame.loc[frame["intervention"] == 1].copy()',
         ["tests/test_data.py::test_filters_intervention_and_flags_aest"],
     ),
     (

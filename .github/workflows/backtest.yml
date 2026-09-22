@@ -1,4 +1,8 @@
-name: Annual backtest
+name: Backtest
+
+# The reference month runs in CI, so the published result is continuously
+# verified rather than quoted from a run nobody can afford to repeat. This
+# workflow exists for running a different period or asset on demand.
 
 on:
   workflow_dispatch:
@@ -6,11 +10,11 @@ on:
       start:
         description: Inclusive physical period boundary
         required: true
-        default: "2022-07-01 00:00"
+        default: "2022-11-01 00:00"
       end:
         description: Exclusive physical period boundary
         required: true
-        default: "2023-07-01 00:00"
+        default: "2022-12-01 00:00"
       degradation_cost:
         description: AUD per discharged MWh
         required: true
@@ -19,7 +23,7 @@ on:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,5 +41,5 @@ jobs:
           --degradation-cost "${{ inputs.degradation_cost }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: annual-backtest
+          name: backtest
           path: outputs/

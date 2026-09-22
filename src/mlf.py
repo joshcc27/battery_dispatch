@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
 from .config import LossFactors, LossFactorTable
-
 
 REQUIRED_COLUMNS = {
     "region",

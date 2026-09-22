@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -28,6 +27,20 @@ def asset() -> BatteryConfig:
     )
 
 
+def passing_audit(**overrides: object) -> dict[str, object]:
+    """A complete, green dispatch audit that a test can spoil one key at a time."""
+    audit: dict[str, object] = {
+        "energy_balance_residual_mwh": 0.0,
+        "max_interval_energy_balance_error_mwh": 0.0,
+        "max_simultaneous_dispatch_fraction": 0.0,
+        "solver_all_optimal": True,
+        "max_solver_mip_gap": 0.0,
+        "completed_cycle_break_even_violation_count": 0,
+    }
+    audit.update(overrides)
+    return audit
+
+
 def test_price_and_dispatch_audits() -> None:
     timestamps = pd.date_range("2023-01-01 00:05", periods=4, freq="5min", tz=AEST)
     prices = pd.DataFrame(
@@ -47,16 +60,39 @@ def test_price_and_dispatch_audits() -> None:
             expected_end="2023-01-01 00:20",
         ),
         **audit_dispatch(trace, asset(), soc_initial=0),
+        **audit_completed_cycles(
+            settle(trace, prices, asset()).intervals,
+            asset(),
+            deg_cost=0.0,
+            initial_soc_mwh=0.0,
+        ),
     }
     assert audit["price_missing_interval_count"] == 0
     assert audit["solver_window_count"] == 1
     assert audit["solver_all_optimal"] is True
-    assert_audit_passes(audit)
+    assert_audit_passes(audit, require_price_audit=True)
 
 
 def test_audit_rejects_non_optimal_status() -> None:
     with pytest.raises(ValueError, match="non-optimal"):
-        assert_audit_passes({"solver_all_optimal": False})
+        assert_audit_passes(passing_audit(solver_all_optimal=False))
+
+
+def test_a_missing_gate_is_a_failure_not_a_pass() -> None:
+    """An absent key means the check never ran, so it must not be treated as green."""
+    for dropped in (
+        "energy_balance_residual_mwh",
+        "max_simultaneous_dispatch_fraction",
+        "completed_cycle_break_even_violation_count",
+    ):
+        audit = passing_audit()
+        del audit[dropped]
+        with pytest.raises(ValueError, match="incomplete"):
+            assert_audit_passes(audit)
+    # Price gates are only demanded when the caller merged the price audit.
+    assert_audit_passes(passing_audit())
+    with pytest.raises(ValueError, match="incomplete"):
+        assert_audit_passes(passing_audit(), require_price_audit=True)
 
 
 def test_completed_cycle_audit_rejects_loss_making_cycle() -> None:
@@ -86,4 +122,4 @@ def test_completed_cycle_audit_rejects_loss_making_cycle() -> None:
     )
     assert audit["completed_cycle_break_even_violation_count"] == 1
     with pytest.raises(ValueError, match="break-even"):
-        assert_audit_passes(audit)
+        assert_audit_passes(passing_audit(**audit))

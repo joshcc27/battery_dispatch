@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "dataset_id": "aemo_dispatchprice_sa1_2022-11",
+  "source": {
+    "publisher": "Australian Energy Market Operator",
+    "table": "DISPATCHPRICE",
+    "archive_url": "https://nemweb.com.au/Data_Archive/Wholesale_Electricity/MMSDM/",
+    "retrieval_library": "NEMOSIS",
+    "region_filter": [
+      "SA1"
+    ],
+    "intervention_filter": 0
+  },
+  "period": {
+    "physical_start_inclusive": "2022-11-01T00:00:00+10:00",
+    "physical_end_exclusive": "2022-12-01T00:00:00+10:00",
+    "first_interval_end": "2022-11-01T00:05:00+10:00",
+    "last_interval_end": "2022-12-01T00:00:00+10:00",
+    "interval_minutes": 5,
+    "timezone": "fixed UTC+10 (AEST)",
+    "timestamp_semantics": "interval ending; physical range is (start, end]",
+    "selection_rationale": "One month is the reference period so the whole grid re-runs in CI. November 2022 is chosen because it is the hardest month in FY2022-23: 38% of intervals are negative-priced and 18 and 20 November are negative in all 288 intervals, so the exclusivity reduction and negative-price charging are exercised rather than assumed."
+  },
+  "partitions": [
+    {
+      "month": "2022-11",
+      "row_count": 8640
+    }
+  ],
+  "validation": {
+    "row_count": 8640,
+    "expected_row_count": 8640,
+    "duplicate_key_count": 0,
+    "missing_interval_count": 0,
+    "unexpected_interval_count": 0,
+    "negative_price_interval_share": 0.38044,
+    "rrp_min_aud_per_mwh": -1000.0,
+    "rrp_max_aud_per_mwh": 15500.0,
+    "canonical_price_sha256": "b9106b5bb75e1476e976b17330c1361b113859d11269bc9954a58afc22da55dc",
+    "checksum_definition": "SHA-256 of pandas uint64 row hashes after sorting settlementdate, regionid, rrp"
+  }
+}

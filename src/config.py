@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
-from typing import Mapping
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, replace
+from datetime import timedelta, timezone
 
 import pandas as pd
-
 
 AEST = timezone(timedelta(hours=10), name="AEST")
 MARKET_FLOOR_PRICE = -1_000.0
@@ -26,9 +25,6 @@ MARKET_PRICE_CAP_BY_FY: dict[str, float] = {
     "2025-26": 20_300.0,
     "2026-27": 23_200.0,
 }
-
-JUNE_2022_EVENT_START = pd.Timestamp("2022-06-12 18:50:00", tz=AEST)
-JUNE_2022_EVENT_END = pd.Timestamp("2022-06-24 14:00:00", tz=AEST)
 
 
 def financial_year(value: object) -> str:
@@ -166,7 +162,7 @@ class BatteryConfig:
             return self.loss_factor_table.for_timestamp(value)
         return self.loss_factors
 
-    def with_loss_factors(self, factors: LossFactors) -> "BatteryConfig":
+    def with_loss_factors(self, factors: LossFactors) -> BatteryConfig:
         return replace(
             self,
             generation_loss_factor=factors.generation,

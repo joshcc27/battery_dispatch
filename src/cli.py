@@ -8,8 +8,8 @@ from pathlib import Path
 from .config import BatteryConfig
 from .data import MarketDataCache
 from .horizon import run_rolling_horizon
-from .mlf import load_loss_factor_schedule
 from .metrics import summarise_run, write_run_outputs
+from .mlf import load_loss_factor_schedule
 from .settlement import settle
 from .validation import (
     assert_audit_passes,
@@ -116,7 +116,7 @@ def main() -> None:
             initial_soc_mwh=asset.initial_soc_mwh,
         ),
     }
-    assert_audit_passes(audit)
+    assert_audit_passes(audit, require_price_audit=True)
     summary.update(audit)
     interval_path, summary_path = write_run_outputs(revenue, summary, args.output)
     print(f"Wrote {interval_path} and {summary_path}")

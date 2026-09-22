@@ -9,7 +9,6 @@ from .optimiser import (
     solve_window,
 )
 from .settlement import RevenueResult, settle
-from .study import run_parameter_sweep
 
 __all__ = [
     "STRICT_SOLVER_POLICY",
@@ -20,7 +19,6 @@ __all__ = [
     "RevenueResult",
     "SolverPolicy",
     "run_rolling_horizon",
-    "run_parameter_sweep",
     "settle",
     "solve_window",
 ]
