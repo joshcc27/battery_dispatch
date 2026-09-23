@@ -37,6 +37,8 @@ REPORT_COLUMNS = [
     "endpoint_case",
     "degradation_cost_per_mwh",
     "total_revenue",
+    "perfect_foresight_ceiling_aud",
+    "horizon_gap_aud",
     "energy_revenue",
     "equivalent_full_cycles",
     "terminal_soc_mwh",

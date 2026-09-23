@@ -172,7 +172,14 @@ DISPATCH_AUDIT_KEYS = (
     "solver_all_optimal",
     "max_solver_mip_gap",
     "completed_cycle_break_even_violation_count",
+    "perfect_foresight_ceiling_aud",
+    "horizon_gap_aud",
 )
+
+# A rolling run is a feasible point of the ceiling LP, so it can exceed the
+# ceiling only by solver tolerance. Anything more is a modelling bug.
+CEILING_ABSOLUTE_TOLERANCE_AUD = 1.0
+CEILING_RELATIVE_TOLERANCE = 1e-6
 
 
 def assert_audit_passes(
@@ -213,6 +220,11 @@ def assert_audit_passes(
         failures.append("solver MIP gap")
     if int(audit["completed_cycle_break_even_violation_count"]) != 0:
         failures.append("completed-cycle break-even")
+    ceiling_tolerance = CEILING_ABSOLUTE_TOLERANCE_AUD + CEILING_RELATIVE_TOLERANCE * abs(
+        float(audit["perfect_foresight_ceiling_aud"])
+    )
+    if float(audit["horizon_gap_aud"]) < -ceiling_tolerance:
+        failures.append("result exceeds perfect-foresight ceiling")
     if failures:
         raise ValueError("Run audit failed: " + ", ".join(failures))
 

@@ -55,6 +55,13 @@ MUTATIONS = [
         ],
     ),
     (
+        "ceiling gate",
+        "validation.py",
+        'if float(audit["horizon_gap_aud"]) < -ceiling_tolerance:',
+        "if False:",
+        ["tests/test_ceiling.py::test_result_above_the_ceiling_fails_the_audit"],
+    ),
+    (
         "settlement sign",
         "settlement.py",
         "merged[\"energy_revenue\"] = merged[\"generation_revenue\"] - merged[\"load_cost\"]",

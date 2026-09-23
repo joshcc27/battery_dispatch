@@ -132,11 +132,16 @@ def solve_window(
     settlementdate: object | None = None,
     terminal_value_per_mwh: float = 0.0,
     policy: SolverPolicy = STRICT_SOLVER_POLICY,
+    enforce_exclusivity: bool = True,
+    throughput_tie_breaker: float = THROUGHPUT_TIE_BREAKER_AUD_PER_MWH,
 ) -> DispatchWindow:
     """Solve one perfect-foresight energy-arbitrage window.
 
     The objective uses the same dated loss factors and degradation convention
     as :func:`battery_dispatch.settlement.settle`.
+
+    ``enforce_exclusivity=False`` with a zero tie-breaker solves the pure LP
+    relaxation used as a revenue ceiling; see :mod:`battery_dispatch.ceiling`.
     """
     price = np.asarray(prices, dtype=float)
     if price.ndim != 1 or len(price) == 0:
@@ -147,6 +152,8 @@ def solve_window(
         raise ValueError("deg_cost must be non-negative")
     if terminal_value_per_mwh < 0:
         raise ValueError("terminal_value_per_mwh must be non-negative")
+    if throughput_tie_breaker < 0:
+        raise ValueError("throughput_tie_breaker must be non-negative")
     soc_tolerance = 1e-8
     if (
         soc_initial < asset.soc_min_mwh - soc_tolerance
@@ -180,7 +187,11 @@ def solve_window(
     # One binary per interval is redundant: simultaneous charge and discharge is
     # strictly dominated wherever burning energy does not pay, which is all but
     # 0.55% of FY2022-23 intervals at the headline A$25/MWh degradation cost.
-    binding = exclusivity_binding_mask(cashflows, asset)
+    binding = (
+        exclusivity_binding_mask(cashflows, asset)
+        if enforce_exclusivity
+        else np.zeros(len(price), dtype=bool)
+    )
     binding_positions = np.flatnonzero(binding)
     if len(binding_positions):
         binding_index = pd.Index(binding_positions, name="interval")
@@ -214,7 +225,7 @@ def solve_window(
         cashflows.discharge_value_per_mw * discharge
         + cashflows.charge_value_per_mw * charge
         - asset.interval_hours
-        * THROUGHPUT_TIE_BREAKER_AUD_PER_MWH
+        * throughput_tie_breaker
         * (charge + discharge)
     ).sum() + terminal_value_per_mwh * soc.sel(interval=intervals[-1])
     model.add_objective(objective, sense="max")

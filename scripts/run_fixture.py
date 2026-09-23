@@ -6,6 +6,7 @@ import json
 
 import pandas as pd
 
+from battery_dispatch.ceiling import audit_ceiling, perfect_foresight_ceiling
 from battery_dispatch.config import AEST, BatteryConfig
 from battery_dispatch.horizon import run_rolling_horizon
 from battery_dispatch.metrics import summarise_run
@@ -39,6 +40,10 @@ def main() -> None:
         **audit_dispatch(trace, asset, soc_initial=asset.initial_soc_mwh),
         **audit_completed_cycles(
             revenue.intervals, asset, deg_cost=0, initial_soc_mwh=asset.initial_soc_mwh
+        ),
+        **audit_ceiling(
+            perfect_foresight_ceiling(prices, asset, soc_initial=asset.initial_soc_mwh),
+            revenue,
         ),
     }
     assert_audit_passes(audit)

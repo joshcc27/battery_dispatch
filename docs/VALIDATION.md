@@ -13,7 +13,27 @@ Failures raise an exception before output is written.
 - charge/discharge exclusivity, power limits and SOC bounds;
 - independently recomputed settlement components;
 - no completed charged-inventory segment discharged below its loss-adjusted
-  acquisition and degradation cost.
+  acquisition and degradation cost;
+- the result does not exceed the full-period perfect-foresight ceiling by more
+  than A$1 plus 1e-6 of the ceiling.
+
+## Perfect-foresight ceiling
+
+`src/ceiling.py` solves the entire period as one LP: same asset, prices, dated
+loss factors, starting SOC and terminal valuation, but no rolling horizon, no
+exclusivity binary and no throughput tie-breaker. Every rolling dispatch is a
+feasible point of that LP, so the LP optimum bounds it from above, and the
+reported `horizon_gap_aud` is a proven upper limit on what better look-ahead
+could add. The LP has no binaries, so a full financial year solves in about 15
+seconds. A run above the ceiling beyond solver tolerance fails the audit,
+because it can only mean the two formulations disagree.
+
+Adding exclusivity binaries lazily — only where the ceiling LP actually charges
+and discharges at once — was tried and rejected. It reproduced the same revenue
+with far fewer binaries (26 against 468 at A$25/MWh) but was slower: at A$10/MWh
+the November grid took 1,027s one interval at a time and 343s adding whole
+negative-price blocks, against 145s for the dominance mask. Fewer binaries gave
+the branch-and-bound a harder search, not an easier one.
 
 A gate whose audit key is absent is treated as a **missing check, not a passing
 one**. `assert_audit_passes` asserts every required key is present before
@@ -134,9 +154,9 @@ validation, audit-gate completeness and sensitivity behavior. The deterministic
 CI fixture exercises fetch-independent optimization, settlement, metrics and
 audits end to end.
 
-`scripts/run_mutation_checks.py` deliberately introduces eleven high-risk
+`scripts/run_mutation_checks.py` deliberately introduces twelve high-risk
 errors: loss-factor removal, charge-efficiency removal, binary relaxation,
-dropping binaries that can bind, skipping the audit-completeness assertion,
+dropping binaries that can bind, skipping the audit-completeness assertion, disabling the ceiling gate,
 settlement sign reversal, degradation sign reversal, wrong intervention
 selection, wrong interval-ending convention, SOC reset and committing the
 look-ahead tail. Each mutation must make its targeted test fail.

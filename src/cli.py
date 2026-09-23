@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .ceiling import audit_ceiling, perfect_foresight_ceiling
 from .config import BatteryConfig
 from .data import MarketDataCache
 from .horizon import run_rolling_horizon
@@ -114,6 +115,17 @@ def main() -> None:
             asset,
             deg_cost=args.degradation_cost,
             initial_soc_mwh=asset.initial_soc_mwh,
+        ),
+        **audit_ceiling(
+            perfect_foresight_ceiling(
+                prices,
+                asset,
+                soc_initial=asset.initial_soc_mwh,
+                deg_cost=args.degradation_cost,
+                terminal_value_per_mwh=args.terminal_value_per_mwh,
+            ),
+            revenue,
+            terminal_value_per_mwh=args.terminal_value_per_mwh,
         ),
     }
     assert_audit_passes(audit, require_price_audit=True)

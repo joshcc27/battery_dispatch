@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from battery_dispatch.ceiling import audit_ceiling, perfect_foresight_ceiling
 from battery_dispatch.config import AEST, BatteryConfig
 from battery_dispatch.horizon import run_rolling_horizon
 from battery_dispatch.settlement import settle
@@ -36,6 +37,8 @@ def passing_audit(**overrides: object) -> dict[str, object]:
         "solver_all_optimal": True,
         "max_solver_mip_gap": 0.0,
         "completed_cycle_break_even_violation_count": 0,
+        "perfect_foresight_ceiling_aud": 0.0,
+        "horizon_gap_aud": 0.0,
     }
     audit.update(overrides)
     return audit
@@ -53,6 +56,7 @@ def test_price_and_dispatch_audits() -> None:
     trace = run_rolling_horizon(
         prices, asset(), soc_initial=0, window_hours=1, step_hours=1
     )
+    revenue = settle(trace, prices, asset())
     audit = {
         **audit_prices(
             prices,
@@ -61,11 +65,12 @@ def test_price_and_dispatch_audits() -> None:
         ),
         **audit_dispatch(trace, asset(), soc_initial=0),
         **audit_completed_cycles(
-            settle(trace, prices, asset()).intervals,
+            revenue.intervals,
             asset(),
             deg_cost=0.0,
             initial_soc_mwh=0.0,
         ),
+        **audit_ceiling(perfect_foresight_ceiling(prices, asset(), soc_initial=0), revenue),
     }
     assert audit["price_missing_interval_count"] == 0
     assert audit["solver_window_count"] == 1

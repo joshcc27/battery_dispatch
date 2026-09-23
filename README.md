@@ -74,6 +74,13 @@ throughput tie-breaker selects the least-cycling schedule among economically
 equivalent optima. The rolling policy optimizes 48 hours, commits 24 hours,
 carries SOC, and discards the look-ahead tail.
 
+Every run also solves the whole period as one LP with the exclusivity binary
+removed. That relaxation can only earn more than any feasible dispatch, so it is
+a proven revenue ceiling, and the audit fails any run that exceeds it. In the
+reference month the rolling result is within A$230 (0.006%) of that ceiling at
+A$25/MWh and within A$2,337 (0.06%) at A$10/MWh; the ceiling takes about two
+seconds to solve.
+
 ## Reproduce
 
 Install and run the offline gates:

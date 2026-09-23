@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from .ceiling import audit_ceiling, perfect_foresight_ceiling
 from .config import BatteryConfig
 from .horizon import run_rolling_horizon
 from .metrics import summarise_run
@@ -82,6 +83,17 @@ def run_sensitivities(
                     asset,
                     deg_cost=float(degradation_cost),
                     initial_soc_mwh=endpoint.initial_soc_mwh,
+                ),
+                **audit_ceiling(
+                    perfect_foresight_ceiling(
+                        prices,
+                        asset,
+                        soc_initial=endpoint.initial_soc_mwh,
+                        deg_cost=float(degradation_cost),
+                        terminal_value_per_mwh=endpoint.terminal_value_per_mwh,
+                    ),
+                    revenue,
+                    terminal_value_per_mwh=endpoint.terminal_value_per_mwh,
                 ),
             }
             assert_audit_passes(audit, mip_gap_tolerance=policy.gap_tolerance)

@@ -34,6 +34,24 @@ effectively untested.
 | `midpoint_initial_soc` | A$25/MWh | 100 MWh | — | A$3,609,405 | A$3,987,493 | 75.62 |
 | `lookahead_salvage_400` | A$25/MWh | minimum | A$400/MWh | A$3,589,229 | A$3,965,450 | 75.24 |
 
+How close each run gets to its perfect-foresight ceiling — the whole month
+solved as one LP with the exclusivity binary removed, which no feasible dispatch
+can beat. Values include the salvage term, so for `lookahead_salvage_400` both
+sides count 190 MWh at A$400/MWh.
+
+| Scenario | Achieved | Ceiling | Gap | Gap share |
+|---|---:|---:|---:|---:|
+| `headline` | A$3,608,856 | A$3,609,086 | A$230 | 0.006% |
+| `degradation_10` | A$3,866,584 | A$3,868,921 | A$2,337 | 0.060% |
+| `degradation_50` | A$3,290,082 | A$3,290,082 | A$0 | 0.000% |
+| `midpoint_initial_soc` | A$3,609,405 | A$3,609,635 | A$230 | 0.006% |
+| `lookahead_salvage_400` | A$3,665,229 | A$3,665,458 | A$230 | 0.006% |
+
+The gap bounds everything the 48-hour horizon and the exclusivity constraint
+together cost, so a longer window could recover at most these amounts. It is
+largest at A$10/MWh, where cheaper cycling makes more of the month's value
+depend on look-ahead.
+
 Solver and audit evidence for the same runs:
 
 | Scenario | Terminal SOC | All optimal | Max MIP gap | Pure-LP windows | Binaries | Runtime |
@@ -92,7 +110,8 @@ partial version.
 
 - Dispatch is perfect-foresight within each 48-hour window, of which the first
   24 hours are committed. That is materially easier than dispatching against a
-  real forecast, and is not the same as annual perfect foresight either.
+  real forecast. The full-period ceiling above shows it is within 0.06% of
+  whole-period perfect foresight in every reported scenario.
 
 ### Period
 
